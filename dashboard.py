@@ -98,7 +98,7 @@ model = OpenAIModel('gpt-4o')
 
 extraction_agent = Agent(
     model,
-    instructions=(
+    system_prompt=(
         "You are a strict compliance auditor. Read the provided contract text and "
         "extract the exact information required by the schema. Do not guess. "
         "If a required field is completely missing, flag missing_critical_data as True."
@@ -108,7 +108,7 @@ extraction_agent = Agent(
 
 rejection_agent = Agent(
     model,
-    instructions=(
+    system_prompt=(
         "You are a professional legal compliance officer. Write a polite but firm "
         "email to a vendor explaining that their contract cannot be approved yet. "
         "List the exact compliance flags provided to you as bullet points they must fix. "
@@ -118,7 +118,7 @@ rejection_agent = Agent(
 
 chat_agent = Agent(
     model,
-    instructions=(
+    system_prompt=(
         "You are a brilliant legal assistant. Use the provided contract text to answer "
         "the user's questions accurately. If the answer is not in the contract text, "
         "say 'That information is not present in this document.' Do not invent answers."
