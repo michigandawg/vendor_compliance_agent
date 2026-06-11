@@ -18,24 +18,55 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 st.set_page_config(page_title="Vendor Compliance Hub", layout="wide")
 
 # ==========================================
+# ENTERPRISE SECURITY GATE
+# ==========================================
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["ADMIN_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password in session
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        st.title("🔐 Secure Enterprise Portal")
+        st.markdown("Unauthorized access is strictly prohibited. Please enter your administrator token.")
+        st.text_input("Access Token", type="password", on_change=password_entered, key="password")
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        st.title("🔐 Secure Enterprise Portal")
+        st.markdown("Unauthorized access is strictly prohibited. Please enter your administrator token.")
+        st.text_input("Access Token", type="password", on_change=password_entered, key="password")
+        st.error("🔒 Authentication failed. Incorrect token.")
+        return False
+    
+    return True
+
+# STOP EXECUTION IF NOT AUTHENTICATED
+if not check_password():
+    st.stop()
+
+# ==========================================
 # ENTERPRISE DATABASE CLOUD CONNECTION
 # ==========================================
-# Pull the secure connection string from Streamlit Cloud Secrets
 try:
     db_url = st.secrets["DATABASE_URL"]
-    # SQLAlchemy 2.0 strictness: ensure postgres prefix is correct
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
+    # Tell SQLAlchemy to use the pure-Python pg8000 driver
+    if db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+pg8000://", 1)
 except Exception as e:
     st.error("⚠️ System halted: DATABASE_URL not found in Streamlit Secrets.")
     st.stop()
 
-# Initialize SQLAlchemy engine and session
 engine = create_engine(db_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Define the production schema for the database table
 class ApprovedVendor(Base):
     __tablename__ = "approved_vendors"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -45,11 +76,9 @@ class ApprovedVendor(Base):
     expiration_date = Column(String, nullable=False)
     liability_limit = Column(Integer, nullable=False)
 
-# Automatically create the table in Neon Postgres if it doesn't exist
 Base.metadata.create_all(bind=engine)
 
 def save_approved_vendor(data):
-    """Commits a passing vendor directly to the permanent cloud ledger."""
     db = SessionLocal()
     try:
         new_vendor = ApprovedVendor(
@@ -93,7 +122,7 @@ def send_rejection_email_live(vendor_email: str, subject: str, body_content: str
         return False
 
 # ==========================================
-# AI AGENTS & SCHEMAS (PydanticAI v0.0.19 Specs)
+# AI AGENTS & SCHEMAS 
 # ==========================================
 class VendorComplianceSchema(BaseModel):
     legal_business_name: str = Field(..., description="Exact legal name of the vendor entity.")
@@ -170,6 +199,11 @@ def extract_text_from_pdf_upload(uploaded_file) -> str:
 # ==========================================
 # WEB APP INTERFACE
 # ==========================================
+# We define a custom logout button in the sidebar
+if st.sidebar.button("🚪 Secure Logout"):
+    del st.session_state["password_correct"]
+    st.rerun()
+
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Audit New Contracts", "Approved Vendors Ledger"])
 
@@ -222,69 +256,4 @@ if page == "Audit New Contracts":
             if status in ["Auto-Approved", "Manually Approved"]:
                 title_string = f"🟢 {filename} — APPROVED"
             elif status == "Rejected":
-                title_string = f"🔴 {filename} — REJECTED (Email Sent)" if details.get("email_sent") else f"🔴 {filename} — REJECTED (Drafted)"
-            else:
-                title_string = f"🟡 {filename} — ACTION REQUIRED"
-                
-            with st.expander(title_string, expanded=(status == "Flagged for Review")):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**Extracted Registry Structure**")
-                    st.json(data.model_dump())
-                    
-                with col2:
-                    st.markdown("**Compliance System Signals**")
-                    if "Approved" in status:
-                        st.success("All compliance parameters passed perfectly. Document archived permanently.")
-                    elif status == "Rejected":
-                        st.error("Application rejected and notification processed.")
-                    else:
-                        for flag in report["flags"]:
-                            st.warning(flag)
-                        
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("Approve Override", key=f"app_{filename}"):
-                                save_approved_vendor(data)
-                                st.session_state.batch_results[filename]["status"] = "Manually Approved"
-                                st.rerun()
-                        with c2:
-                            if st.button("Issue Rejection", key=f"rej_{filename}"):
-                                flags_text = "\n".join(report["flags"])
-                                prompt = f"Draft an email for {data.legal_business_name}. Vendor Email Placeholder: [Insert Vendor Representative Email Here]. Here are the flags:\n{flags_text}"
-                                rej_result = rejection_agent.run_sync(prompt)
-                                st.session_state.batch_results[filename]["rejection_email"] = rej_result.output
-                                st.session_state.batch_results[filename]["status"] = "Rejected"
-                                st.rerun()
-
-                if details["rejection_email"] and not details.get("email_sent"):
-                    st.divider()
-                    st.markdown("**Automated Rejection Correspondence**")
-                    
-                    edited_email = st.text_area("Review and edit correspondence draft:", details["rejection_email"], height=220, key=f"email_box_{filename}")
-                    
-                    vendor_dest_email = st.text_input("Target Vendor Representative Email:", "vendor_rep@supplier.com", key=f"email_to_{filename}")
-                    
-                    if st.button("✉️ Send Email to Vendor Live", key=f"send_btn_{filename}"):
-                        with st.spinner("Transmitting email over secure SMTP channel..."):
-                            subject_line = f"Contract Compliance Review: {data.legal_business_name}"
-                            if send_rejection_email_live(vendor_dest_email, subject_line, edited_email):
-                                st.session_state.batch_results[filename]["email_sent"] = True
-                                st.success("Email successfully transmitted to recipient!")
-                                st.rerun()
-                            else:
-                                st.error("Failed to transmit. Please verify SMTP app credentials in code.")
-
-        st.divider()
-        st.subheader("🕵️‍♂️ Interactive Investigation Desk")
-        
-        chat_file = st.selectbox(
-            "Select an uploaded contract to interrogate:", 
-            options=list(st.session_state.batch_results.keys())
-        )
-        
-        if chat_file:
-            st.session_state.selected_chat_file = chat_file
-            if chat_file not in st.session_state.chat_histories:
-                st.session_state.chat_histories[chat_file] = []
+                title_string = f"🔴 {filename} — REJECTED (Email Sent)" if details.get("email_sent") else f"🔴 {filename} — REJECT

@@ -5,4 +5,4 @@ pypdf==5.3.1
 streamlit==1.42.0
 pandas==2.2.3
 sqlalchemy==2.0.30
-psycopg2-binary==2.9.9
+pg8000==1.31.2
