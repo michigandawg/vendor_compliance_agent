@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import smtplib
 from email.message import EmailMessage
 import pandas as pd
@@ -10,6 +9,8 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
 from pypdf import PdfReader
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 # ==========================================
 # PAGE CONFIGURATION
@@ -17,48 +18,63 @@ from pypdf import PdfReader
 st.set_page_config(page_title="Vendor Compliance Hub", layout="wide")
 
 # ==========================================
-# DATABASE & EMAIL LOGIC
+# ENTERPRISE DATABASE CLOUD CONNECTION
 # ==========================================
-def setup_database():
-    conn = sqlite3.connect('vendor_compliance.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS approved_vendors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            legal_business_name TEXT,
-            tax_id TEXT,
-            effective_date TEXT,
-            expiration_date TEXT,
-            liability_limit INTEGER
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# Pull the secure connection string from Streamlit Cloud Secrets
+try:
+    db_url = st.secrets["DATABASE_URL"]
+    # SQLAlchemy 2.0 strictness: ensure postgres prefix is correct
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+except Exception as e:
+    st.error("⚠️ System halted: DATABASE_URL not found in Streamlit Secrets.")
+    st.stop()
+
+# Initialize SQLAlchemy engine and session
+engine = create_engine(db_url)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Define the production schema for the database table
+class ApprovedVendor(Base):
+    __tablename__ = "approved_vendors"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    legal_business_name = Column(String, nullable=False)
+    tax_id = Column(String, nullable=False)
+    effective_date = Column(String, nullable=False)
+    expiration_date = Column(String, nullable=False)
+    liability_limit = Column(Integer, nullable=False)
+
+# Automatically create the table in Neon Postgres if it doesn't exist
+Base.metadata.create_all(bind=engine)
 
 def save_approved_vendor(data):
-    conn = sqlite3.connect('vendor_compliance.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO approved_vendors (
-            legal_business_name, tax_id, effective_date, expiration_date, liability_limit
-        ) VALUES (?, ?, ?, ?, ?)
-    ''', (
-        data.legal_business_name, 
-        data.tax_id, 
-        str(data.effective_date), 
-        str(data.expiration_date), 
-        data.general_liability_limit
-    ))
-    conn.commit()
-    conn.close()
+    """Commits a passing vendor directly to the permanent cloud ledger."""
+    db = SessionLocal()
+    try:
+        new_vendor = ApprovedVendor(
+            legal_business_name=data.legal_business_name,
+            tax_id=data.tax_id,
+            effective_date=str(data.effective_date),
+            expiration_date=str(data.expiration_date),
+            liability_limit=data.general_liability_limit
+        )
+        db.add(new_vendor)
+        db.commit()
+    except Exception as e:
+        st.error(f"Database transaction failed: {e}")
+    finally:
+        db.close()
 
+# ==========================================
+# EMAIL TRANSMISSION LOGIC
+# ==========================================
 def send_rejection_email_live(vendor_email: str, subject: str, body_content: str) -> bool:
-    """Sends the drafted email using standard SMTP (e.g., Gmail App Password)."""
     sender_email = os.getenv("VENDER_BOT_EMAIL", "your_bot_email@gmail.com")
     sender_password = os.getenv("VENDER_BOT_APP_PASSWORD", "your_app_password_here")
     
     if sender_password == "your_app_password_here":
-        st.warning("⚠️ SMTP credentials not configured. Update sender_password in the code to test live sending.")
+        st.warning("⚠️ SMTP credentials not configured. Email blocked from leaving development environment.")
         return False
 
     msg = EmailMessage()
@@ -76,10 +92,8 @@ def send_rejection_email_live(vendor_email: str, subject: str, body_content: str
         st.error(f"Failed to transmit email via SMTP: {e}")
         return False
 
-setup_database()
-
 # ==========================================
-# AI AGENTS & SCHEMAS
+# AI AGENTS & SCHEMAS (PydanticAI v0.0.19 Specs)
 # ==========================================
 class VendorComplianceSchema(BaseModel):
     legal_business_name: str = Field(..., description="Exact legal name of the vendor entity.")
@@ -94,7 +108,12 @@ class VendorComplianceSchema(BaseModel):
     data_privacy_flag: bool = Field(..., description="True if the contract involves personal data.")
     missing_critical_data: bool = Field(default=False, description="Set to True ONLY IF required fields are missing.")
 
-model = OpenAIModel('gpt-4o')
+try:
+    api_key = st.secrets["OPENAI_API_KEY"]
+    model = OpenAIModel('gpt-4o', api_key=api_key)
+except Exception:
+    st.error("⚠️ OPENAI_API_KEY not found in Streamlit secrets.")
+    st.stop()
 
 extraction_agent = Agent(
     model,
@@ -217,7 +236,7 @@ if page == "Audit New Contracts":
                 with col2:
                     st.markdown("**Compliance System Signals**")
                     if "Approved" in status:
-                        st.success("All compliance parameters passed perfectly. Document archived.")
+                        st.success("All compliance parameters passed perfectly. Document archived permanently.")
                     elif status == "Rejected":
                         st.error("Application rejected and notification processed.")
                     else:
@@ -268,40 +287,4 @@ if page == "Audit New Contracts":
         if chat_file:
             st.session_state.selected_chat_file = chat_file
             if chat_file not in st.session_state.chat_histories:
-                st.session_state.chat_histories[chat_file] = []
-                
-            for msg in st.session_state.chat_histories[chat_file]:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-            if user_question := st.chat_input("Ask a question about the selected document:", key="batch_chat_input"):
-                st.session_state.chat_histories[chat_file].append({"role": "user", "content": user_question})
-                st.rerun()
-
-if page == "Audit New Contracts" and st.session_state.get("selected_chat_file"):
-    current_file = st.session_state.selected_chat_file
-    if st.session_state.chat_histories[current_file] and st.session_state.chat_histories[current_file][-1]["role"] == "user":
-        latest_question = st.session_state.chat_histories[current_file][-1]["content"]
-        raw_doc_text = st.session_state.batch_results[current_file]["text"]
-        
-        context_prompt = f"Contract Text:\n{raw_doc_text}\n\nUser Question:\n{latest_question}"
-        chat_result = chat_agent.run_sync(context_prompt)
-        
-        st.session_state.chat_histories[current_file].append({"role": "assistant", "content": chat_result.output})
-        st.rerun()
-
-elif page == "Approved Vendors Ledger":
-    st.title("🏢 Secure Vendor Ledger")
-    st.markdown("Below is the live database of all vendors that have passed compliance or received a human override.")
-    
-    conn = sqlite3.connect('vendor_compliance.db')
-    try:
-        df = pd.read_sql_query("SELECT * FROM approved_vendors", conn)
-        if df.empty:
-            st.info("No vendors have been approved yet.")
-        else:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(f"Error loading database: {e}")
-    finally:
-        conn.close()
+                st.session_state.chat_histories[chat_file] =
