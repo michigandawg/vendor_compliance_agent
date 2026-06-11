@@ -8,7 +8,7 @@ from datetime import date
 from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIModel
 from pypdf import PdfReader
 
 # ==========================================
@@ -45,7 +45,7 @@ def save_approved_vendor(data):
     ''', (
         data.legal_business_name, 
         data.tax_id, 
-        str(data.effective_date), 
+        model = OpenAIModel('gpt-4o')
         str(data.expiration_date), 
         data.general_liability_limit
     ))
@@ -54,7 +54,6 @@ def save_approved_vendor(data):
 
 def send_rejection_email_live(vendor_email: str, subject: str, body_content: str) -> bool:
     """Sends the drafted email using standard SMTP (e.g., Gmail App Password)."""
-    # NOTE: For production, set these in your system environment variables or Streamlit secrets
     sender_email = os.getenv("VENDER_BOT_EMAIL", "your_bot_email@gmail.com")
     sender_password = os.getenv("VENDER_BOT_APP_PASSWORD", "your_app_password_here")
     
@@ -69,7 +68,6 @@ def send_rejection_email_live(vendor_email: str, subject: str, body_content: str
     msg['To'] = vendor_email
 
     try:
-        # Connecting to Gmail's secure SMTP server
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(sender_email, sender_password)
             server.send_message(msg)
@@ -96,7 +94,7 @@ class VendorComplianceSchema(BaseModel):
     data_privacy_flag: bool = Field(..., description="True if the contract involves personal data.")
     missing_critical_data: bool = Field(default=False, description="Set to True ONLY IF required fields are missing.")
 
-model = OpenAIChatModel('gpt-4o')
+model = OpenAIModel('gpt-4o')
 
 extraction_agent = Agent(
     model,
