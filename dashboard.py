@@ -103,7 +103,7 @@ extraction_agent = Agent(
         "extract the exact information required by the schema. Do not guess. "
         "If a required field is completely missing, flag missing_critical_data as True."
     ),
-    result_type=VendorComplianceSchema
+    output_type=VendorComplianceSchema
 )
 
 rejection_agent = Agent(
