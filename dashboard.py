@@ -287,4 +287,4 @@ if page == "Audit New Contracts":
         if chat_file:
             st.session_state.selected_chat_file = chat_file
             if chat_file not in st.session_state.chat_histories:
-                st.session_state.chat_histories[chat_file] =
+                st.session_state.chat_histories[chat_file] = []
