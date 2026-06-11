@@ -45,7 +45,7 @@ def save_approved_vendor(data):
     ''', (
         data.legal_business_name, 
         data.tax_id, 
-        model = OpenAIModel('gpt-4o')
+        str(data.effective_date), 
         str(data.expiration_date), 
         data.general_liability_limit
     ))
@@ -243,7 +243,6 @@ if page == "Audit New Contracts":
                     st.divider()
                     st.markdown("**Automated Rejection Correspondence**")
                     
-                    # Editable text area for fine-tuning before sending
                     edited_email = st.text_area("Review and edit correspondence draft:", details["rejection_email"], height=220, key=f"email_box_{filename}")
                     
                     vendor_dest_email = st.text_input("Target Vendor Representative Email:", "vendor_rep@supplier.com", key=f"email_to_{filename}")
