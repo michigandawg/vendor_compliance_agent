@@ -73,7 +73,7 @@ def send_rejection_email_live(vendor_email: str, subject: str, body_content: str
             server.send_message(msg)
         return True
     except Exception as e:
-        st.error(f"Failed to send email via SMTP: {e}")
+        st.error(f"Failed to transmit email via SMTP: {e}")
         return False
 
 setup_database()
@@ -103,7 +103,7 @@ extraction_agent = Agent(
         "extract the exact information required by the schema. Do not guess. "
         "If a required field is completely missing, flag missing_critical_data as True."
     ),
-    output_type=VendorComplianceSchema
+    result_type=VendorComplianceSchema
 )
 
 rejection_agent = Agent(
