@@ -1,5 +1,6 @@
 import os
 import smtplib
+import asyncio
 from email.message import EmailMessage
 import pandas as pd
 import streamlit as st
@@ -13,9 +14,15 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # ==========================================
-# PAGE CONFIGURATION
+# PAGE CONFIGURATION & THREADING FIX
 # ==========================================
 st.set_page_config(page_title="Vendor Compliance Hub", layout="wide")
+
+# This creates an event loop for Streamlit's background threads
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 # ==========================================
 # ENTERPRISE SECURITY GATE
@@ -52,15 +59,12 @@ if not check_password():
 try:
     db_url = st.secrets["DATABASE_URL"]
     
-    # 1. Standardize the Postgres prefix
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
         
-    # 2. Inject the pure-Python pg8000 driver
     if db_url.startswith("postgresql://") and "pg8000" not in db_url:
         db_url = db_url.replace("postgresql://", "postgresql+pg8000://", 1)
         
-    # 3. Automatically strip the incompatible sslmode parameter
     if "?sslmode=require" in db_url:
         db_url = db_url.replace("?sslmode=require", "")
         
@@ -68,7 +72,6 @@ except Exception as e:
     st.error("⚠️ System halted: DATABASE_URL not found in Streamlit Secrets.")
     st.stop()
 
-# 4. Explicitly pass the SSL context safely to the engine
 engine = create_engine(db_url, connect_args={'ssl_context': True})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
