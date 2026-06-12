@@ -21,12 +21,10 @@ st.set_page_config(page_title="Vendor Compliance Hub", layout="wide")
 # ENTERPRISE SECURITY GATE
 # ==========================================
 def check_password():
-    """Returns `True` if the user had the correct password."""
     def password_entered():
-        """Checks whether a password entered by the user is correct."""
         if st.session_state["password"] == st.secrets.get("ADMIN_PASSWORD", "SuperSecureSaaS2026!"):
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store password in session
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
@@ -45,7 +43,6 @@ def check_password():
     
     return True
 
-# STOP EXECUTION IF NOT AUTHENTICATED
 if not check_password():
     st.stop()
 
@@ -56,7 +53,6 @@ try:
     db_url = st.secrets["DATABASE_URL"]
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
-    # Tell SQLAlchemy to use the pure-Python pg8000 driver
     if db_url.startswith("postgresql://") and "pg8000" not in db_url:
         db_url = db_url.replace("postgresql://", "postgresql+pg8000://", 1)
 except Exception as e:
@@ -102,13 +98,12 @@ def send_rejection_email_live(vendor_email: str, subject: str, body_content: str
     sender_email = os.getenv("VENDER_BOT_EMAIL", "your_bot_email@gmail.com")
     sender_password = os.getenv("VENDER_BOT_APP_PASSWORD", "your_app_password_here")
     
-    # Fallback to secrets if os.getenv fails in Streamlit Cloud
     if sender_email == "your_bot_email@gmail.com":
         sender_email = st.secrets.get("VENDER_BOT_EMAIL", "your_bot_email@gmail.com")
         sender_password = st.secrets.get("VENDER_BOT_APP_PASSWORD", "your_app_password_here")
 
     if sender_password == "your_app_password_here":
-        st.warning("⚠️ SMTP credentials not configured. Email blocked from leaving development environment.")
+        st.warning("⚠️ SMTP credentials not configured.")
         return False
 
     msg = EmailMessage()
@@ -204,7 +199,6 @@ def extract_text_from_pdf_upload(uploaded_file) -> str:
 # ==========================================
 # WEB APP INTERFACE
 # ==========================================
-# We define a custom logout button in the sidebar
 if st.sidebar.button("🚪 Secure Logout"):
     del st.session_state["password_correct"]
     st.rerun()
@@ -300,9 +294,7 @@ if page == "Audit New Contracts":
                 if details["rejection_email"] and not details.get("email_sent"):
                     st.divider()
                     st.markdown("**Automated Rejection Correspondence**")
-                    
                     edited_email = st.text_area("Review and edit correspondence draft:", details["rejection_email"], height=220, key=f"email_box_{filename}")
-                    
                     vendor_dest_email = st.text_input("Target Vendor Representative Email:", "vendor_rep@supplier.com", key=f"email_to_{filename}")
                     
                     if st.button("✉️ Send Email to Vendor Live", key=f"send_btn_{filename}"):
@@ -317,11 +309,7 @@ if page == "Audit New Contracts":
 
         st.divider()
         st.subheader("🕵️‍♂️ Interactive Investigation Desk")
-        
-        chat_file = st.selectbox(
-            "Select an uploaded contract to interrogate:", 
-            options=list(st.session_state.batch_results.keys())
-        )
+        chat_file = st.selectbox("Select an uploaded contract to interrogate:", options=list(st.session_state.batch_results.keys()))
         
         if chat_file:
             st.session_state.selected_chat_file = chat_file
