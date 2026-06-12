@@ -219,6 +219,10 @@ if st.sidebar.button("🚪 Secure Logout"):
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Audit New Contracts", "Approved Vendors Ledger"])
 
+st.sidebar.divider()
+st.sidebar.subheader("⚙️ Storage Configuration")
+archive_path = st.sidebar.text_input("Local PDF Archive Path:", value="./vendor_archives")
+
 # --- PAGE 1: BATCH AUDIT DASHBOARD ---
 if page == "Audit New Contracts":
     st.title("📦 Enterprise Batch Compliance Auditor")
@@ -228,142 +232,4 @@ if page == "Audit New Contracts":
         st.session_state.batch_results = {}
     if "selected_chat_file" not in st.session_state:
         st.session_state.selected_chat_file = None
-    if "chat_histories" not in st.session_state:
-        st.session_state.chat_histories = {}
-
-    uploaded_files = st.file_uploader("Drag and drop multiple contract PDFs here", type="pdf", accept_multiple_files=True)
-
-    if uploaded_files:
-        if st.button("🚀 Execute Batch Process"):
-            with st.spinner(f"Processing {len(uploaded_files)} documents through the agent pipelines..."):
-                for uploaded_file in uploaded_files:
-                    filename = uploaded_file.name
-                    if filename not in st.session_state.batch_results:
-                        text = extract_text_from_pdf_upload(uploaded_file)
-                        result = extraction_agent.run_sync(text)
-                        
-                        # AI FRAMEWORK ALIGNMENT FIX: .data instead of .output
-                        extracted_data = result.data 
-                        report = compliance_rule_engine(extracted_data)
-                        
-                        st.session_state.batch_results[filename] = {
-                            "data": extracted_data,
-                            "report": report,
-                            "text": text,
-                            "rejection_email": None,
-                            "email_sent": False,
-                            "status": "Auto-Approved" if report["passed_all_rules"] else "Flagged for Review"
-                        }
-                        
-                        if report["passed_all_rules"]:
-                            save_approved_vendor(extracted_data)
-
-    if st.session_state.batch_results:
-        st.divider()
-        st.subheader("📋 Processing Queue Results")
-        
-        for filename, details in list(st.session_state.batch_results.items()):
-            extracted_data = details["data"]
-            report = details["report"]
-            status = details["status"]
-            
-            if status in ["Auto-Approved", "Manually Approved"]:
-                title_string = f"🟢 {filename} — APPROVED"
-            elif status == "Rejected":
-                title_string = f"🔴 {filename} — REJECTED (Email Sent)" if details.get("email_sent") else f"🔴 {filename} — REJECTED (Drafted)"
-            else:
-                title_string = f"🟡 {filename} — ACTION REQUIRED"
-                
-            with st.expander(title_string, expanded=(status == "Flagged for Review")):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**Extracted Registry Structure**")
-                    st.json(extracted_data.model_dump())
-                    
-                with col2:
-                    st.markdown("**Compliance System Signals**")
-                    if "Approved" in status:
-                        st.success("All compliance parameters passed perfectly. Document archived permanently.")
-                    elif status == "Rejected":
-                        st.error("Application rejected and notification processed.")
-                    else:
-                        for flag in report["flags"]:
-                            st.warning(flag)
-                        
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("Approve Override", key=f"app_{filename}"):
-                                save_approved_vendor(extracted_data)
-                                st.session_state.batch_results[filename]["status"] = "Manually Approved"
-                                st.rerun()
-                        with c2:
-                            if st.button("Issue Rejection", key=f"rej_{filename}"):
-                                flags_text = "\n".join(report["flags"])
-                                prompt = f"Draft an email for {extracted_data.legal_business_name}. Vendor Email Placeholder: [Insert Vendor Representative Email Here]. Here are the flags:\n{flags_text}"
-                                rej_result = rejection_agent.run_sync(prompt)
-                                
-                                # AI FRAMEWORK ALIGNMENT FIX: .data instead of .output
-                                st.session_state.batch_results[filename]["rejection_email"] = rej_result.data
-                                st.session_state.batch_results[filename]["status"] = "Rejected"
-                                st.rerun()
-
-                if details["rejection_email"] and not details.get("email_sent"):
-                    st.divider()
-                    st.markdown("**Automated Rejection Correspondence**")
-                    edited_email = st.text_area("Review and edit correspondence draft:", details["rejection_email"], height=220, key=f"email_box_{filename}")
-                    vendor_dest_email = st.text_input("Target Vendor Representative Email:", "vendor_rep@supplier.com", key=f"email_to_{filename}")
-                    
-                    if st.button("✉️ Send Email to Vendor Live", key=f"send_btn_{filename}"):
-                        with st.spinner("Transmitting email over secure SMTP channel..."):
-                            subject_line = f"Contract Compliance Review: {extracted_data.legal_business_name}"
-                            if send_rejection_email_live(vendor_dest_email, subject_line, edited_email):
-                                st.session_state.batch_results[filename]["email_sent"] = True
-                                st.success("Email successfully transmitted to recipient!")
-                                st.rerun()
-                            else:
-                                st.error("Failed to transmit. Please verify SMTP app credentials in code.")
-
-        st.divider()
-        st.subheader("🕵️‍♂️ Interactive Investigation Desk")
-        chat_file = st.selectbox("Select an uploaded contract to interrogate:", options=list(st.session_state.batch_results.keys()))
-        
-        if chat_file:
-            st.session_state.selected_chat_file = chat_file
-            if chat_file not in st.session_state.chat_histories:
-                st.session_state.chat_histories[chat_file] = []
-                
-            for msg in st.session_state.chat_histories[chat_file]:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-            if user_question := st.chat_input("Ask a question about the selected document:", key="batch_chat_input"):
-                st.session_state.chat_histories[chat_file].append({"role": "user", "content": user_question})
-                st.rerun()
-
-if page == "Audit New Contracts" and st.session_state.get("selected_chat_file"):
-    current_file = st.session_state.selected_chat_file
-    if st.session_state.chat_histories[current_file] and st.session_state.chat_histories[current_file][-1]["role"] == "user":
-        latest_question = st.session_state.chat_histories[current_file][-1]["content"]
-        raw_doc_text = st.session_state.batch_results[current_file]["text"]
-        
-        context_prompt = f"Contract Text:\n{raw_doc_text}\n\nUser Question:\n{latest_question}"
-        chat_result = chat_agent.run_sync(context_prompt)
-        
-        # AI FRAMEWORK ALIGNMENT FIX: .data instead of .output
-        st.session_state.chat_histories[current_file].append({"role": "assistant", "content": chat_result.data})
-        st.rerun()
-
-# --- PAGE 2: SECURE CLOUD LEDGER ---
-elif page == "Approved Vendors Ledger":
-    st.title("🏢 Secure Global Vendor Ledger")
-    st.markdown("Below is the live cloud database of all vendors that have passed compliance or received a human override. Data is synchronized with Neon Postgres.")
-    
-    try:
-        df = pd.read_sql_table("approved_vendors", con=engine)
-        if df.empty:
-            st.info("No vendors have been approved yet.")
-        else:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(f"Error loading cloud database: {e}")
+    if "chat_histories" not in st
