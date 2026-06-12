@@ -4,5 +4,5 @@ openai==1.61.0
 pypdf==5.3.1
 streamlit==1.42.0
 pandas==2.2.3
-sqlalchemy==2.0.30
+sqlalchemy==2.0.36
 pg8000==1.31.2
