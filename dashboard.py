@@ -18,7 +18,6 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # ==========================================
 st.set_page_config(page_title="Vendor Compliance Hub", layout="wide")
 
-# This creates an event loop for Streamlit's background threads
 try:
     asyncio.get_running_loop()
 except RuntimeError:
@@ -88,15 +87,15 @@ class ApprovedVendor(Base):
 
 Base.metadata.create_all(bind=engine)
 
-def save_approved_vendor(data):
+def save_approved_vendor(vendor_data):
     db = SessionLocal()
     try:
         new_vendor = ApprovedVendor(
-            legal_business_name=data.legal_business_name,
-            tax_id=data.tax_id,
-            effective_date=str(data.effective_date),
-            expiration_date=str(data.expiration_date),
-            liability_limit=data.general_liability_limit
+            legal_business_name=vendor_data.legal_business_name,
+            tax_id=vendor_data.tax_id,
+            effective_date=str(vendor_data.effective_date),
+            expiration_date=str(vendor_data.expiration_date),
+            liability_limit=vendor_data.general_liability_limit
         )
         db.add(new_vendor)
         db.commit()
@@ -242,11 +241,13 @@ if page == "Audit New Contracts":
                     if filename not in st.session_state.batch_results:
                         text = extract_text_from_pdf_upload(uploaded_file)
                         result = extraction_agent.run_sync(text)
-                        data = result.output
-                        report = compliance_rule_engine(data)
+                        
+                        # AI FRAMEWORK ALIGNMENT FIX: .data instead of .output
+                        extracted_data = result.data 
+                        report = compliance_rule_engine(extracted_data)
                         
                         st.session_state.batch_results[filename] = {
-                            "data": data,
+                            "data": extracted_data,
                             "report": report,
                             "text": text,
                             "rejection_email": None,
@@ -255,14 +256,14 @@ if page == "Audit New Contracts":
                         }
                         
                         if report["passed_all_rules"]:
-                            save_approved_vendor(data)
+                            save_approved_vendor(extracted_data)
 
     if st.session_state.batch_results:
         st.divider()
         st.subheader("📋 Processing Queue Results")
         
         for filename, details in list(st.session_state.batch_results.items()):
-            data = details["data"]
+            extracted_data = details["data"]
             report = details["report"]
             status = details["status"]
             
@@ -278,7 +279,7 @@ if page == "Audit New Contracts":
                 
                 with col1:
                     st.markdown("**Extracted Registry Structure**")
-                    st.json(data.model_dump())
+                    st.json(extracted_data.model_dump())
                     
                 with col2:
                     st.markdown("**Compliance System Signals**")
@@ -293,15 +294,17 @@ if page == "Audit New Contracts":
                         c1, c2 = st.columns(2)
                         with c1:
                             if st.button("Approve Override", key=f"app_{filename}"):
-                                save_approved_vendor(data)
+                                save_approved_vendor(extracted_data)
                                 st.session_state.batch_results[filename]["status"] = "Manually Approved"
                                 st.rerun()
                         with c2:
                             if st.button("Issue Rejection", key=f"rej_{filename}"):
                                 flags_text = "\n".join(report["flags"])
-                                prompt = f"Draft an email for {data.legal_business_name}. Vendor Email Placeholder: [Insert Vendor Representative Email Here]. Here are the flags:\n{flags_text}"
+                                prompt = f"Draft an email for {extracted_data.legal_business_name}. Vendor Email Placeholder: [Insert Vendor Representative Email Here]. Here are the flags:\n{flags_text}"
                                 rej_result = rejection_agent.run_sync(prompt)
-                                st.session_state.batch_results[filename]["rejection_email"] = rej_result.output
+                                
+                                # AI FRAMEWORK ALIGNMENT FIX: .data instead of .output
+                                st.session_state.batch_results[filename]["rejection_email"] = rej_result.data
                                 st.session_state.batch_results[filename]["status"] = "Rejected"
                                 st.rerun()
 
@@ -313,7 +316,7 @@ if page == "Audit New Contracts":
                     
                     if st.button("✉️ Send Email to Vendor Live", key=f"send_btn_{filename}"):
                         with st.spinner("Transmitting email over secure SMTP channel..."):
-                            subject_line = f"Contract Compliance Review: {data.legal_business_name}"
+                            subject_line = f"Contract Compliance Review: {extracted_data.legal_business_name}"
                             if send_rejection_email_live(vendor_dest_email, subject_line, edited_email):
                                 st.session_state.batch_results[filename]["email_sent"] = True
                                 st.success("Email successfully transmitted to recipient!")
@@ -347,7 +350,8 @@ if page == "Audit New Contracts" and st.session_state.get("selected_chat_file"):
         context_prompt = f"Contract Text:\n{raw_doc_text}\n\nUser Question:\n{latest_question}"
         chat_result = chat_agent.run_sync(context_prompt)
         
-        st.session_state.chat_histories[current_file].append({"role": "assistant", "content": chat_result.output})
+        # AI FRAMEWORK ALIGNMENT FIX: .data instead of .output
+        st.session_state.chat_histories[current_file].append({"role": "assistant", "content": chat_result.data})
         st.rerun()
 
 # --- PAGE 2: SECURE CLOUD LEDGER ---
